@@ -369,6 +369,15 @@ public abstract class PGroup {
         return new DataflowOperator(this, params, code).start();
     }
 
+    public DataflowProcessor operator(boolean start,final List inputChannels, final List outputChannels, final Closure code) {
+        final HashMap<String, List> params = new HashMap<String, List>(5);
+        params.put(DataflowProcessor.INPUTS, inputChannels);
+        params.put(DataflowProcessor.OUTPUTS, outputChannels);
+        if(start)
+            return new DataflowOperator(this,params,code).start();
+        return new DataflowOperator(this, params, code);
+    }
+
     /**
      * Creates an operator using the current parallel group
      *
@@ -385,6 +394,7 @@ public abstract class PGroup {
         params.put(DataflowProcessor.MAX_FORKS, maxForks);
         return new DataflowOperator(this, params, code).start();
     }
+
 
     /**
      * Creates an operator using the current parallel group

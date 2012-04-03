@@ -275,4 +275,8 @@ public abstract class DataflowProcessor {
         handler.setResolveStrategy(Closure.DELEGATE_FIRST);
         errorHandlers.add(handler);
     }
+
+    public final DataflowProcessorActor getActor(){
+        return actor;
+    }
 }

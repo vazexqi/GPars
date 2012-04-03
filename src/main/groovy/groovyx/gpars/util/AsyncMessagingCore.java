@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 public abstract class AsyncMessagingCore implements Runnable {
 
     private Pool threadPool;
+    private Graph g;
 
     /**
      * Fair agents give up the thread after processing each message, non-fair agents keep a thread until their message queue is empty.
@@ -96,6 +97,7 @@ public abstract class AsyncMessagingCore implements Runnable {
     public void store(final Object message) {
         queue.add(message != null ? message : NullObject.getNullObject());
         if (activeUpdater.compareAndSet(this, PASSIVE, ACTIVE)) {  //we're not checking emptiness of the queue since the probability of useless scheduling is low and we avoid the overhead with the method call and synchronization on the inside queue size
+            g.updateCounter(1);
             threadPool.execute(this);
         }
     }
@@ -105,6 +107,7 @@ public abstract class AsyncMessagingCore implements Runnable {
      */
     void schedule() {
         if (!queue.isEmpty() && activeUpdater.compareAndSet(this, PASSIVE, ACTIVE)) {
+            g.updateCounter(1);
             threadPool.execute(this);
         }
     }
@@ -141,6 +144,7 @@ public abstract class AsyncMessagingCore implements Runnable {
         } finally {
             threadUnassigned();
             activeUpdater.set(this, PASSIVE);
+            g.updateCounter(-1);
             if (continueProcessingMessages()) schedule();
         }
     }
@@ -172,4 +176,14 @@ public abstract class AsyncMessagingCore implements Runnable {
     protected abstract void registerError(final Throwable e);
 
     protected abstract void handleMessage(final Object message);
+
+    public boolean isActive(){
+        return activeUpdater.get(this)==1;
+    }
+
+    public void setConditionVariable(Graph graph){
+        this.g = graph;
+
+    }
+
 }

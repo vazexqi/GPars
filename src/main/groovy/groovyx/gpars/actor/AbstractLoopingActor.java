@@ -42,7 +42,7 @@ public abstract class AbstractLoopingActor extends Actor {
      */
     private AsyncMessagingCore core;
 
-    final AsyncMessagingCore getCore() {
+    public final AsyncMessagingCore getCore() {
         return core;
     }
 
@@ -294,4 +294,8 @@ public abstract class AbstractLoopingActor extends Actor {
         currentSender = message.getSender();
         code.call(arguments);
     }
+
+
+
+
 }
