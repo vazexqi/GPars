@@ -1,6 +1,6 @@
 // GPars - Groovy Parallel Systems
 //
-// Copyright © 2008-11  The original author or authors
+// Copyright © 2008-2012  The original author or authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,15 +35,17 @@ import java.util.concurrent.Semaphore;
 final class ForkingDataflowOperatorActor extends DataflowOperatorActor {
     private final Semaphore semaphore;
     private final Pool threadPool;
+    private final int maxForks;
 
     ForkingDataflowOperatorActor(final DataflowOperator owningOperator, final PGroup group, final List outputs, final List inputs, final Closure code, final int maxForks) {
         super(owningOperator, group, outputs, inputs, code);
+        this.maxForks = maxForks;
         this.semaphore = new Semaphore(maxForks);
         this.threadPool = group.getThreadPool();
     }
 
     @Override
-    void startTask(final List results) {
+    void startTask(final List<Object> results) {
         try {
             semaphore.acquire();
         } catch (InterruptedException e) {
@@ -59,5 +61,17 @@ final class ForkingDataflowOperatorActor extends DataflowOperatorActor {
                 }
             }
         });
+    }
+
+    @Override
+    protected void forwardPoisonPill(final Object data) {
+        try {
+            semaphore.acquire(maxForks);
+        } catch (InterruptedException e) {
+            owningProcessor.reportError(e);
+        } finally {
+            super.forwardPoisonPill(data);
+            semaphore.release(maxForks);
+        }
     }
 }

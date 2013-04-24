@@ -1,6 +1,6 @@
 // GPars - Groovy Parallel Systems
 //
-// Copyright © 2008-11  The original author or authors
+// Copyright © 2008-2012  The original author or authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import groovy.lang.Closure;
 import groovyx.gpars.dataflow.SelectResult;
 import groovyx.gpars.group.PGroup;
 
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -39,8 +40,10 @@ class DataflowSelectorActor extends DataflowProcessorActor {
         passIndex = code.getMaximumNumberOfParameters() == 2;
     }
 
+    @Override
     @SuppressWarnings({"UnusedDeclaration"})
-    void afterStart() {
+    final void afterStart() {
+        super.afterStart();
         ((DataflowSelector) owningProcessor).doSelect();
     }
 
@@ -52,13 +55,35 @@ class DataflowSelectorActor extends DataflowProcessorActor {
         }
         final SelectResult msg = (SelectResult) message;
         final int index = msg.getIndex();
-        final Object value = msg.getValue();
-        if (checkPoison(value)) return;
-        startTask(index, value);
+        Object value = msg.getValue();
+
+        if (isControlMessage(value)) {
+            value = fireMessageArrived(value, index, true);
+            if (value instanceof PoisonPill) handlePoisonPillInSelector(index, value);
+            if (isControlMessage(value)) return;
+        }
+
+        final Object verifiedValue = fireMessageArrived(value, index, false);
+        final List<Object> verifiedValues = owningProcessor.fireBeforeRun(Arrays.asList(verifiedValue));
+
+        startTask(index, verifiedValues.get(0));
         if (stoppingGently) {
             stop();
         }
         if (!hasBeenStopped()) ((DataflowSelector) owningProcessor).doSelect();
+    }
+
+    private void handlePoisonPillInSelector(final int index, final Object value) {
+        if (((PoisonPill) value).isImmediate()) {
+            checkPoison(value);
+        } else {
+            final DataflowSelector selector = (DataflowSelector) owningProcessor;
+            selector.setGuard(index, false);
+            if (selector.allGuardsClosed()) checkPoison(value);
+            else {
+                if (!hasBeenStopped()) ((DataflowSelector) owningProcessor).doSelect();
+            }
+        }
     }
 
     @SuppressWarnings({"CatchGenericClass"})
@@ -71,6 +96,8 @@ class DataflowSelectorActor extends DataflowProcessorActor {
             }
         } catch (Throwable e) {
             reportException(e);
+        } finally {
+            owningProcessor.fireAfterRun(Arrays.asList(result));
         }
     }
 }

@@ -1,6 +1,6 @@
 // GPars - Groovy Parallel Systems
 //
-// Copyright © 2008-11  The original author or authors
+// Copyright © 2008-2012  The original author or authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package groovyx.gpars.dataflow.operator
 
 import groovyx.gpars.dataflow.DataflowQueue
 import groovyx.gpars.dataflow.DataflowVariable
+
 import static groovyx.gpars.dataflow.Dataflow.operator
 import static groovyx.gpars.dataflow.Dataflow.prioritySelector
 import static groovyx.gpars.dataflow.Dataflow.selector
@@ -37,7 +38,7 @@ public class DataflowOperatorShutdownTest extends GroovyTestCase {
         final DataflowQueue d = new DataflowQueue()
         final DataflowQueue e = new DataflowQueue()
 
-        def op = operator(inputs: [a, b, c], outputs: [d, e]) {x, y, z ->
+        def op = operator(inputs: [a, b, c], outputs: [d, e]) { x, y, z ->
             bindOutput 0, x + y + z
             bindOutput 1, x * y * z
         }
@@ -51,6 +52,76 @@ public class DataflowOperatorShutdownTest extends GroovyTestCase {
         a << PoisonPill.instance
         assert d.val == PoisonPill.instance
         assert e.val == PoisonPill.instance
+        op.join()
+    }
+
+    public void testSingleOperatorWithEmptyOutput() {
+        final DataflowQueue a = new DataflowQueue()
+        final DataflowQueue b = new DataflowQueue()
+        final DataflowQueue c = new DataflowQueue()
+        final DataflowQueue d = new DataflowQueue()
+
+        def op = operator(inputs: [a, b, c], outputs: []) { x, y, z ->
+            d << x + y + z
+        }
+
+        a << 10
+        b << 20
+        c << 30
+
+        assert 60 == d.val
+        a << PoisonPill.instance
+        op.join()
+        assert !d.isBound()
+    }
+
+    public void testSingleOperatorWithNoOutput() {
+        final DataflowQueue a = new DataflowQueue()
+        final DataflowQueue b = new DataflowQueue()
+        final DataflowQueue c = new DataflowQueue()
+        final DataflowQueue d = new DataflowQueue()
+
+        def op = operator(inputs: [a, b, c], listeners: [new DataflowEventAdapter() {
+            @Override
+            boolean onException(final DataflowProcessor processor, final Throwable e) {
+                d << e
+                return super.onException(processor, e)
+            }
+        }]) { x, y, z ->
+            d << x + y + z
+        }
+
+        a << 10
+        b << 20
+        c << 30
+
+        assert 60 == d.val
+        a << PoisonPill.instance
+        op.join()
+        assert !d.isBound()
+    }
+
+    public void testSingleOperatorImmediatePill() {
+        final DataflowQueue a = new DataflowQueue()
+        final DataflowQueue b = new DataflowQueue()
+        final DataflowQueue c = new DataflowQueue()
+        final DataflowQueue d = new DataflowQueue()
+        final DataflowQueue e = new DataflowQueue()
+
+        def op = operator(inputs: [a, b, c], outputs: [d, e]) { x, y, z ->
+            bindOutput 0, x + y + z
+            bindOutput 1, x * y * z
+        }
+
+        a << 10
+        b << 20
+        c << 30
+
+        assert 60 == d.val
+        assert 6000 == e.val
+        a << PoisonPill.immediateInstance
+        assert d.val == PoisonPill.immediateInstance
+        assert e.val == PoisonPill.immediateInstance
         op.join()
     }
 
@@ -75,7 +146,7 @@ public class DataflowOperatorShutdownTest extends GroovyTestCase {
         final DataflowVariable a = new DataflowVariable()
         final DataflowVariable d = new DataflowVariable()
 
-        def op = operator(inputs: [a], outputs: [d]) {x ->
+        def op = operator(inputs: [a], outputs: [d]) { x ->
             bindOutput x
         }
 
@@ -93,11 +164,11 @@ public class DataflowOperatorShutdownTest extends GroovyTestCase {
         final DataflowQueue f = new DataflowQueue()
         final DataflowQueue out = new DataflowQueue()
 
-        def op1 = operator(inputs: [a, b, c], outputs: [d, e]) {x, y, z -> }
+        def op1 = operator(inputs: [a, b, c], outputs: [d, e]) { x, y, z -> }
 
-        def op2 = operator(inputs: [d], outputs: [f, out]) { }
+        def op2 = operator(inputs: [d], outputs: [f, out]) {}
 
-        def op3 = operator(inputs: [e, f], outputs: [b, out]) {x, y -> }
+        def op3 = operator(inputs: [e, f], outputs: [b, out]) { x, y -> }
 
         a << PoisonPill.instance
 
@@ -108,7 +179,7 @@ public class DataflowOperatorShutdownTest extends GroovyTestCase {
         op3.join()
     }
 
-    public void testSelectorNetwork() {
+    public void testSelectorNetworkWithFeedbackLoopAndNonImmediatePillNeverStops() {
         final DataflowQueue a = new DataflowQueue()
         final DataflowQueue b = new DataflowQueue()
         final DataflowQueue c = new DataflowQueue()
@@ -117,15 +188,43 @@ public class DataflowOperatorShutdownTest extends GroovyTestCase {
         final DataflowQueue f = new DataflowQueue()
         final DataflowQueue out = new DataflowQueue()
 
-        def op1 = selector(inputs: [a, b, c], outputs: [d, e]) {value, index -> }
+        def op1 = selector(inputs: [a, b, c], outputs: [d, e]) { value, index -> }
 
-        def op2 = selector(inputs: [d], outputs: [f, out]) { }
+        def op2 = selector(inputs: [d], outputs: [f, out]) {}
 
-        def op3 = prioritySelector(inputs: [e, f], outputs: [b]) {value, index -> }
+        def op3 = prioritySelector(inputs: [e, f], outputs: [b]) { value, index -> }
 
         a << PoisonPill.instance
+        sleep 500
+        assert !out.bound
+
+        b << PoisonPill.instance
+        c << PoisonPill.instance
 
         assert out.val == PoisonPill.instance
+        op1.join()
+        op2.join()
+        op3.join()
+    }
+
+    public void testSelectorNetworkImmediatePill() {
+        final DataflowQueue a = new DataflowQueue()
+        final DataflowQueue b = new DataflowQueue()
+        final DataflowQueue c = new DataflowQueue()
+        final DataflowQueue d = new DataflowQueue()
+        final DataflowQueue e = new DataflowQueue()
+        final DataflowQueue f = new DataflowQueue()
+        final DataflowQueue out = new DataflowQueue()
+
+        def op1 = selector(inputs: [a, b, c], outputs: [d, e]) { value, index -> }
+
+        def op2 = selector(inputs: [d], outputs: [f, out]) {}
+
+        def op3 = prioritySelector(inputs: [e, f], outputs: [b]) { value, index -> }
+
+        a << PoisonPill.immediateInstance
+
+        assert out.val == PoisonPill.immediateInstance
         op1.join()
         op2.join()
         op3.join()

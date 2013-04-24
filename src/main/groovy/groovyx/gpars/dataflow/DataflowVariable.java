@@ -1,6 +1,6 @@
 // GPars - Groovy Parallel Systems
 //
-// Copyright © 2008-11  The original author or authors
+// Copyright © 2008-2012  The original author or authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,13 @@
 
 package groovyx.gpars.dataflow;
 
+import groovy.lang.Closure;
 import groovyx.gpars.actor.impl.MessageStream;
 import groovyx.gpars.dataflow.expression.DataflowExpression;
+import groovyx.gpars.dataflow.impl.ThenMessagingRunnable;
+import groovyx.gpars.group.PGroup;
 import groovyx.gpars.remote.RemoteHost;
+import groovyx.gpars.scheduler.Pool;
 import groovyx.gpars.serial.RemoteSerialized;
 
 import java.util.concurrent.TimeUnit;
@@ -91,11 +95,9 @@ public class DataflowVariable<T> extends DataflowExpression<T> implements Datafl
      */
     @Override
     @SuppressWarnings({"ProhibitedExceptionDeclared"})
-    public T get() throws Throwable {
+    public final T get() throws Throwable {
         final T result = getVal();
-        if (result instanceof Throwable) {
-            throw (Throwable) result;
-        }
+        if (error != null) throw error;
         return result;
     }
 
@@ -116,13 +118,90 @@ public class DataflowVariable<T> extends DataflowExpression<T> implements Datafl
         }
         if (result == null) {
             if (shouldThrowTimeout()) throw new TimeoutException("Timeout expired in DataflowVariable.get().");
-            return getVal();
+            return get();
         }
         return result;
     }
 
     boolean shouldThrowTimeout() {
         return !this.isBound();
+    }
+
+    /**
+     * Checks if the promise is bound to an error
+     *
+     * @return True, if an error has been bound
+     */
+    @Override
+    public boolean isError() {
+        return isBound() && error != null;
+    }
+
+    /**
+     * Returns the error bound to the promise
+     *
+     * @return The error
+     * @throws IllegalStateException If not bound or not bound to an error
+     */
+    @Override
+    public Throwable getError() {
+        if (isError()) return error;
+        else throw new IllegalStateException("No error has been bound to the dataflow variable.");
+    }
+
+    @Override
+    public void touch() {
+        //Intentionally left empty
+    }
+
+    /**
+     * Schedule closure to be executed after data became available.
+     * It is important to notice that even if the expression is already bound the execution of closure
+     * will not happen immediately but will be scheduled
+     *
+     * @param closure      closure to execute when data becomes available. The closure should take at most one argument.
+     * @param errorHandler closure to execute when an error (instance of Throwable) gets bound. The closure should take at most one argument.
+     * @return A promise for the results of the supplied closure. This allows for chaining of then() method calls.
+     */
+    @Override
+    public <V> Promise<V> then(final Closure<V> closure, final Closure<V> errorHandler) {
+        final DataflowVariable<V> result = new DataflowVariable<V>();
+        whenBound(new ThenMessagingRunnable<T, V>(result, closure, errorHandler));
+        return result;
+    }
+
+    /**
+     * Schedule closure to be executed after data becomes available.
+     * It is important to notice that even if the expression is already bound the execution of closure
+     * will not happen immediately but will be scheduled.
+     *
+     * @param pool         The thread pool to use for task scheduling for asynchronous message delivery
+     * @param closure      closure to execute when data becomes available. The closure should take at most one argument.
+     * @param errorHandler closure to execute when an error (instance of Throwable) gets bound. The closure should take at most one argument.
+     * @return A promise for the results of the supplied closure. This allows for chaining of then() method calls.
+     */
+    @Override
+    public <V> Promise<V> then(final Pool pool, final Closure<V> closure, final Closure<V> errorHandler) {
+        final DataflowVariable<V> result = new DataflowVariable<V>();
+        whenBound(pool, new ThenMessagingRunnable<T, V>(result, closure, errorHandler));
+        return result;
+    }
+
+    /**
+     * Schedule closure to be executed after data becomes available.
+     * It is important to notice that even if the expression is already bound the execution of closure
+     * will not happen immediately but will be scheduled.
+     *
+     * @param group        The PGroup to use for task scheduling for asynchronous message delivery
+     * @param closure      closure to execute when data becomes available. The closure should take at most one argument.
+     * @param errorHandler closure to execute when an error (instance of Throwable) gets bound. The closure should take at most one argument.
+     * @return A promise for the results of the supplied closure. This allows for chaining of then() method calls.
+     */
+    @Override
+    public <V> Promise<V> then(final PGroup group, final Closure<V> closure, final Closure<V> errorHandler) {
+        final DataflowVariable<V> result = new DataflowVariable<V>();
+        whenBound(group, new ThenMessagingRunnable<T, V>(result, closure, errorHandler));
+        return result;
     }
 
     @Override

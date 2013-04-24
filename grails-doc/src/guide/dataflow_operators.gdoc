@@ -56,16 +56,26 @@ operator(inputs: [urlRequests], outputs: [downloadRequests, sites]) {request ->
 }
 {code}
 
-The standard error handling will print out an error message to standard error output and terminate the operator in case an uncaught
-exception is thrown from withing the operator's body. To alter the behavior, you can register you custom error handlers using the _addErrorHandler()_ method
-on the operator:
+{note}
+The standard error handling will print out an error message to the standard error output and terminate the operator in case an uncaught
+exception is thrown from withing the operator's body. To alter the behavior, you can register your own event listener:
 
 {code}
-    op.addErrorHandler {Throwable e ->
-        //handle the exception
-        terminate()  //You can also terminate the operator
+def listener = new DataflowEventAdapter() {
+    @Override
+    boolean onException(final DataflowProcessor processor, final Throwable e) {
+        logChannel << e
+        return false   //Indicate whether to terminate the operator or not
     }
+}
+
+op = group.operator(inputs: [a, b], outputs: [c], listeners: [listener]) {x, y ->
+    ...
+}
+See the _Operator lifecycle_ section for more details.
 {code}
+
+{note}
 
 h4. Types of operators
 
@@ -120,9 +130,31 @@ or in case your thread pools use non-daemon threads, such as when using the NonD
 otherwise your applications will not exit.
 {note}
 
+You may selectively override the default group used for tasks, operators, callbacks and other dataflow elements inside
+a code block using the _Dataflow.usingGroup() method:
+{code}
+Dataflow.usingGroup(group) {
+    operator(inputs: [a, b, c], outputs: [d]) {x, y, z ->
+        ...
+        bindOutput 0, x + y + z
+    }
+}
+{code}
+
+You can always override the default group by being specific:
+
+{code}
+Dataflow.usingGroup(group) {
+    anotherGroup.operator(inputs: [a, b, c], outputs: [d]) {x, y, z ->
+        ...
+        bindOutput 0, x + y + z
+    }
+}
+{code}
+
 h3. Constructing operators
 
-The construction properties of an operator, such as _inputs_, _outputs_ or _maxForks_ cannot be modified once the operator has been build.
+The construction properties of an operator, such as _inputs_, _outputs_, _stateObject_ or _maxForks_ cannot be modified once the operator has been build.
 You may find the _groovyx.gpars.dataflow.ProcessingNode_ class helpful when gradually collecting channels and values into lists
 before you finally build an operator.
 
@@ -158,6 +190,27 @@ bValues << 2
 
 assert [11, 22] == (1..2).collect {
     results.val
+}
+{code}
+
+h3. State in operators
+
+Although operators can frequently do without keeping state between subsequent invocations, GPars allows operators to maintain state,
+if desired by the developer. One obvious way is to leverage the Groovy closure capabilities to close-over their context:
+
+{code}
+int counter = 0
+operator(inputs: [a], outputs: [b]) {value ->
+    counter += 1
+}
+{code}
+
+Another way, which allows you to avoid declaring the state object outside of the operator definition, is to pass the state object
+into the operator as a _stateObject_ parameter at construction time:
+
+{code}
+operator(inputs: [a], outputs: [b], stateObject: [counter: 0]) {value ->
+    stateObject.counter += 1
 }
 {code}
 
@@ -248,140 +301,122 @@ operator(inputs:[inputChannel], outputs:[a, b], maxForks:5) {msg ->
  If preserving the order of messages in multiple output channels is not an issue, _bindAllOutputs_ as well as _bindAllOutputValues_ will provide better performance over the atomic variants.
 {note}
 
-h4. Terminating operators
+h4. Operator lifecycle
 
-Dataflow operators and selectors can be terminated in two ways:
-# by calling the terminate() method on all operators that need to be terminated
-# by sending a poisson message.
-
-Using the terminate() method:
+Dataflow operators and selectors fire several events during their lifecycle, which allows the interested parties to obtain
+notifications and potential alter operator's behavior. The _DataflowEventListener_ interface offers a couple of callback methods:
 {code}
-def op1 = operator(inputs: [a, b, c], outputs: [d, e]) {x, y, z -> }
+public interface DataflowEventListener {
+    /**
+     * Invoked immediately after the operator starts by a pooled thread before the first message is obtained
+     *
+     * @param processor The reporting dataflow operator/selector
+     */
+    void afterStart(DataflowProcessor processor);
 
-def op2 = selector(inputs: [d], outputs: [f, out]) { }
+    /**
+     * Invoked immediately after the operator terminates
+     *
+     * @param processor The reporting dataflow operator/selector
+     */
+    void afterStop(DataflowProcessor processor);
 
-def op3 = prioritySelector(inputs: [e, f], outputs: [b]) {value, index -> }
+    /**
+     * Invoked if an exception occurs.
+     * If any of the listeners returns true, the operator will terminate.
+     * Exceptions outside of the operator's body or listeners' messageSentOut() handlers will terminate the operator irrespective of the listeners' votes.
+     *
+     * @param processor The reporting dataflow operator/selector
+     * @param e         The thrown exception
+     * @return True, if the operator should terminate in response to the exception, false otherwise.
+     */
+    boolean onException(DataflowProcessor processor, Throwable e);
 
-[op1, op2, op3]*.terminate()  //Terminate all operators by calling the terminate() method on them
-op1.join()
-op2.join()
-op3.join()
-{code}
+    /**
+     * Invoked when a message becomes available in an input channel.
+     *
+     * @param processor The reporting dataflow operator/selector
+     * @param channel   The input channel holding the message
+     * @param index     The index of the input channel within the operator
+     * @param message   The incoming message
+     * @return The original message or a message that should be used instead
+     */
+    Object messageArrived(DataflowProcessor processor, DataflowReadChannel<Object> channel, int index, Object message);
 
-Using the poisson message:
+    /**
+     * Invoked when a control message (instances of ControlMessage) becomes available in an input channel.
+     *
+     * @param processor The reporting dataflow operator/selector
+     * @param channel   The input channel holding the message
+     * @param index     The index of the input channel within the operator
+     * @param message   The incoming message
+     * @return The original message or a message that should be used instead
+     */
+    Object controlMessageArrived(DataflowProcessor processor, DataflowReadChannel<Object> channel, int index, Object message);
 
-{code}
-def op1 = operator(inputs: [a, b, c], outputs: [d, e]) {x, y, z -> }
+    /**
+     * Invoked when a message is being bound to an output channel.
+     *
+     * @param processor The reporting dataflow operator/selector
+     * @param channel   The output channel to send the message to
+     * @param index     The index of the output channel within the operator
+     * @param message   The message to send
+     * @return The original message or a message that should be used instead
+     */
+    Object messageSentOut(DataflowProcessor processor, DataflowWriteChannel<Object> channel, int index, Object message);
 
-def op2 = selector(inputs: [d], outputs: [f, out]) { }
+    /**
+     * Invoked when all messages required to trigger the operator become available in the input channels.
+     *
+     * @param processor The reporting dataflow operator/selector
+     * @param messages  The incoming messages
+     * @return The original list of messages or a modified/new list of messages that should be used instead
+     */
+    List<Object> beforeRun(DataflowProcessor processor, List<Object> messages);
 
-def op3 = prioritySelector(inputs: [e, f], outputs: [b]) {value, index -> }
+    /**
+     * Invoked when the operator completes a single run
+     *
+     * @param processor The reporting dataflow operator/selector
+     * @param messages  The incoming messages that have been processed
+     */
+    void afterRun(DataflowProcessor processor, List<Object> messages);
 
-a << PoisonPill.instance  //Send the poisson
-
-op1.join()
-op2.join()
-op3.join()
-{code}
-
-After receiving a poisson an operator terminates. It only makes sure the poisson is first sent to all its output channels, so that the poisson can spread to the connected operators.
-Also, although operators typically wait for all inputs to have a value, in case of _PoisonPills_, the operator will terminate
-immediately as soon as a _PoisonPill_ appears on any of its inputs.
-
-{note}
-Given the potential variety of operator networks and their asynchronous nature, a good termination strategy is that
-operators and selectors should only ever terminate themselves.
-All ways of terminating them from outside (either by calling the terminate() method or by sending poisson down the stream)
-may result in messages being lost somewhere in the pipes, when the reading operators terminate before they fully handle
-the messages waiting in their input channels.
-{note}
-
-h4. Stopping operators gently
-
-Operators handle incoming messages repeatedly. The only safe moment for stopping an operator without the risk of loosing
-any messages is right after the operator has finished processing messages is just about to look for more messages in its incoming pipes.
-This is exactly what the terminateAfterNextRun() method does. It will schedule the operator for shutdown after the next set
-of messages gets handled.
-This may be particularly handy when you use a group of operators/selectors to load-balance messages coming from a channel.
-Once the work-load decreases, the terminateAfterNextRun() method may be used to safely reduce the pool of load-balancing operators.
-
-h4. Poison with counting
-
-When sending a poison pill down the operator network you may need to be notified when all the operators or a specified number of them
-have been stopped. The _CountingPoisonPill_ class serves exactly this purpose:
-
-{code}
-operator(inputs: [a, b, c], outputs: [d, e]) {x, y, z -> }
-selector(inputs: [d], outputs: [f, out]) { }
-prioritySelector(inputs: [e, f], outputs: [b]) {value, index -> }
-
-//Send the poisson indicating the number of operators than need to be terminated before we can continue
-final pill = new CountingPoisonPill(3)
-a << pill
-
-//Wait for all operators to terminate
-pill.join()
-//At least 3 operators should be terminated by now
-{code}
-
-The _termination_ property of the _CountingPoisonPill_ class is a regular _Promise<Boolean>_ and so has a lot of handy properties.
-{code}
-//Send the poisson indicating the number of operators than need to be terminated before we can continue
-final pill = new CountingPoisonPill(3)
-pill.termination.whenBound {println "Reporting asynchronously that the network has been stopped"}
-a << pill
-
-if (pill.termination.bound) println "Wow, that was quick. We are done already!"
-else println "Things are being slow today. The network is still running."
-
-//Wait for all operators to terminate
-assert pill.termination.get()
-//At least 3 operators should be terminated by now
-{code}
-
-h4. Termination tips and tricks
-
-Notice that GPars _tasks_ return a _DataflowVariable_, which gets bound to a value as soon as the task finishes.
-The 'terminator' operator below leverages the fact that _DataflowVariables_ are implementations of the _DataflowReadChannel_
-interface and thus can be consumed by operators. As soon as both tasks finish, the operator will send a _PoisonPill_
-down the _q_ channel to stop the consumer as soon as it processes all data.
-
-{code}
-import groovyx.gpars.dataflow.DataflowQueue
-import groovyx.gpars.group.NonDaemonPGroup
-
-
-def group = new NonDaemonPGroup()
-
-final DataflowQueue q = new DataflowQueue()
-
-// final destination
-def customs = group.operator(inputs: [q], outputs: []) { value ->
-    println "Customs received $value"
+    /**
+     * Invoked when the fireCustomEvent() method is triggered manually on a dataflow operator/selector
+     *
+     * @param processor The reporting dataflow operator/selector
+     * @param data      The custom piece of data provided as part of the event
+     * @return A value to return from the fireCustomEvent() method to the caller (event initiator)
+     */
+    Object customEvent(DataflowProcessor processor, Object data);
 }
+{code}
 
-// big producer
-def green = group.task {
-    (1..100).each {
-        q << 'green channel ' + it
-        sleep 10
+A default implementation is provided through the _DataflowEventAdapter_ class.
+
+Listeners provide a way to handle exceptions, when they occur inside operators. A listener may typically log such exceptions,
+notify a supervising entity, generate an alternative output or perform any steps required to recover from the situation.
+If there's no listener registered or if any of the listeners returns _true_ the operator will terminate, preserving the contract of _afterStop()_ .
+Exceptions that occur outside the actual operator's body, i.e. at the parameter preparation phase before the body is triggered
+or at the clean-up and channel subscription phase, after the body finishes, always lead to operator termination.
+
+The _fireCustomEvent()_ method available on operators and selectors may be used to communicate back and forth between operator's body
+and the interested listeners:
+{code}
+final listener = new DataflowEventAdapter() {
+    @Override
+    Object customEvent(DataflowProcessor processor, Object data) {
+        println "Log: Getting quite high on the scale $data"
+        return 100  //The value to use instead
     }
 }
 
-// little producer
-def red = group.task {
-    (1..10).each {
-        q << 'red channel ' + it
-        sleep 15
-    }
+op = group.operator(inputs: [a, b], outputs: [c], listeners: [listener]) {x, y ->
+    final sum = x + y
+    if (sum > 100) bindOutput(fireCustomEvent(sum))  //Reporting that the sum is too high, binding the lowered value that comes back
+    else bindOutput sum
 }
-
-def terminator = group.operator(inputs: [green, red], outputs: []) { t1, t2 ->
-    q << PoisonPill.instance
-}
-
-customs.join()
-group.shutdown()
 {code}
 
 h2. Selectors

@@ -8,7 +8,7 @@ h3. A simple mashup example
 
 In the example we're downloading the front pages of three popular web sites, each in their own task, while in a separate task we're filtering out sites talking about Groovy today and forming the output. The output task synchronizes automatically with the three download tasks on the three Dataflow variables through which the content of each website is passed to the output task.
 
-{code}import static groovyx.gpars.GParsPool.*
+{code}import static groovyx.gpars.GParsPool.withPool
 import groovyx.gpars.dataflow.DataflowVariable
 import static groovyx.gpars.dataflow.Dataflow.task
 
@@ -82,13 +82,39 @@ or in case your thread pools use non-daemon threads, such as when using the NonD
 otherwise your applications will not exit.
 {note}
 
+You may selectively override the default group used for tasks, operators, callbacks and other dataflow elements inside
+a code block using the _Dataflow.usingGroup() method:
+{code}
+Dataflow.usingGroup(group) {
+    task {
+        'http://gpars.codehaus.org'.toURL().text  //should throw MalformedURLException
+    }
+    .then {page -> page.toUpperCase()}
+    .then {page -> page.contains('GROOVY')}
+    .then({mentionsGroovy -> println "Groovy found: $mentionsGroovy"}, {error -> println "Error: $error"}).join()
+}
+{code}
+
+You can always override the default group by being specific:
+
+{code}
+Dataflow.usingGroup(group) {
+    anotherGroup.task {
+        'http://gpars.codehaus.org'.toURL().text  //should throw MalformedURLException
+    }
+    .then(anotherGroup) {page -> page.toUpperCase()}
+    .then(anotherGroup) {page -> page.contains('GROOVY')}.then(anotherGroup) {println Dataflow.retrieveCurrentDFPGroup();it}
+    .then(anotherGroup, {mentionsGroovy -> println "Groovy found: $mentionsGroovy"}, {error -> println "Error: $error"}).join()
+}
+{code}
+
 h3. A mashup variant with methods
 
 To avoid giving you wrong impression about structuring the Dataflow code, here's a rewrite of the mashup example, with a _downloadPage()_ method performing the actual download in a separate task and returning a DataflowVariable instance, so that the main application thread could eventually get hold of the downloaded content.
 Dataflow variables can obviously be passed around as parameters or return values.
 {code}package groovyx.gpars.samples.dataflow
 
-import static groovyx.gpars.GParsExecutorsPool.*
+import static groovyx.gpars.GParsExecutorsPool.withPool
 import groovyx.gpars.dataflow.DataflowVariable
 import static groovyx.gpars.dataflow.Dataflow.task
 
@@ -245,14 +271,14 @@ new Dataflows().with {
 h2. Returning a value from a task
 
 Typically dataflow tasks communicate through dataflow variables. On top of that, tasks can also return values, again through a dataflow variable.
- When you invoke the _task()_ factory method, you get back an instance of DataflowVariable, on which you can listen for the task's return value,
- just like when using any other DataflowVariable.
+ When you invoke the _task()_ factory method, you get back an instance of Promise (implemented as DataflowVariable), through which you can listen for the task's return value,
+ just like when using any other Promise or DataflowVariable.
 
  {code}
-    final DataflowVariable t1 = task {
+    final Promise t1 = task {
         return 10
     }
-    final DataflowVariable t2 = task {
+    final Promise t2 = task {
         return 20
     }
     def results = [t1, t2]*.val
@@ -275,10 +301,10 @@ task >> {value -> println "The task finished and returned $value"}
 
  {code}
  task {
-     final DataflowVariable t1 = task {
+     final Promise t1 = task {
          println 'First sub-task running.'
      }
-     final DataflowVariable t2 = task {
+     final Promise t2 = task {
          println 'Second sub-task running'
      }
      [t1, t2]*.join()

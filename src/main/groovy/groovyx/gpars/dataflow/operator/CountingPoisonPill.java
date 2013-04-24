@@ -1,6 +1,6 @@
 // GPars - Groovy Parallel Systems
 //
-// Copyright © 2008-11  The original author or authors
+// Copyright © 2008-2012  The original author or authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,28 +16,25 @@
 
 package groovyx.gpars.dataflow.operator;
 
-import groovyx.gpars.dataflow.DataflowVariable;
 import groovyx.gpars.dataflow.Promise;
 
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Represents a PoisonPill that counts stopped operators and can be used to wait for all the operators to terminate.
+ * Represents a non-immediate PoisonPill that counts stopped operators and can be used to wait for all the operators to terminate.
  *
  * @author Vaclav Pech
  */
 public final class CountingPoisonPill extends PoisonPill {
-    private final DataflowVariable<Boolean> termination = new DataflowVariable<Boolean>();
-    private final AtomicInteger counter;
+    private final PoisonTrackCounter poisonTrackCounter;
 
     /**
-     * Creates an instance that could be used to stop operators in a network.
+     * Creates a non-immediate instance that could be used to stop operators in a network.
      *
      * @param count The number of operators that need to be stopped before the join() method returns.
      */
     public CountingPoisonPill(final int count) {
-        this.counter = new AtomicInteger(count);
+        poisonTrackCounter = new PoisonTrackCounter(count);
     }
 
     /**
@@ -46,7 +43,7 @@ public final class CountingPoisonPill extends PoisonPill {
      * @throws InterruptedException If the current thread gets interrupted during the blocking
      */
     public void join() throws InterruptedException {
-        termination.join();
+        poisonTrackCounter.join();
     }
 
     /**
@@ -57,16 +54,20 @@ public final class CountingPoisonPill extends PoisonPill {
      * @throws InterruptedException If the current thread gets interrupted during the blocking
      */
     public void join(final long timeout, final TimeUnit unit) throws InterruptedException {
-        termination.join(timeout, unit);
+        poisonTrackCounter.join(timeout, unit);
     }
 
+    /**
+     * Retrieves the promise for termination
+     * @return A Promise instance that will be bound when all the requested dataflow pocessors have been terminated
+     */
     public Promise<Boolean> getTermination() {
-        return termination;
+        return poisonTrackCounter.getTermination();
     }
 
     @Override
     void countDown() {
-        final int currentValue = counter.decrementAndGet();
-        if (currentValue == 0) termination.bind(true);
+        poisonTrackCounter.countDown();
     }
 }
+

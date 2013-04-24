@@ -20,12 +20,13 @@ import groovyx.gpars.dataflow.DataflowVariable
 import groovyx.gpars.forkjoin.AbstractForkJoinWorker
 import groovyx.gpars.forkjoin.ForkJoinUtils
 import groovyx.gpars.util.PoolUtils
+import jsr166y.ForkJoinPool
+import jsr166y.RecursiveTask
+
 import java.lang.Thread.UncaughtExceptionHandler
 import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
-import jsr166y.ForkJoinPool
-import jsr166y.RecursiveTask
 
 /**
  * Enables a ParallelArray-based (from JSR-166y) DSL on collections. In general cases the Parallel Array implementation
@@ -86,9 +87,9 @@ public class GParsPool {
      * operation on each image in the <i>images</i> collection in parallel.
      * Be sure to synchronize all modifiable state shared by the asynchronously running closures.
      * <pre>
-     * GParsPool.withPool {GParsPool pool ->
+     * GParsPool.withPool {GParsPool pool -&gt;
      *     def result = Collections.synchronizedSet(new HashSet())
-     *     [1, 2, 3, 4, 5].eachParallel {Number number -> result.add(number * 10)}*     assertEquals(new HashSet([10, 20, 30, 40, 50]), result)
+     *     [1, 2, 3, 4, 5].eachParallel {Number number -&gt; result.add(number * 10)}*     assertEquals(new HashSet([10, 20, 30, 40, 50]), result)
      *}* </pre>
      * @param cl The block of code to invoke with the DSL enabled
      */
@@ -106,9 +107,9 @@ public class GParsPool {
      * operation on each image in the <i>images</i> collection in parallel.
      * Be sure to synchronize all modifiable state shared by the asynchronously running closures.
      * <pre>
-     * GParsPool.withPool(5) {GParsPool pool ->
+     * GParsPool.withPool(5) {GParsPool pool -&gt;
      *     def result = Collections.synchronizedSet(new HashSet())
-     *     [1, 2, 3, 4, 5].eachParallel {Number number -> result.add(number * 10)}*     assertEquals(new HashSet([10, 20, 30, 40, 50]), result)
+     *     [1, 2, 3, 4, 5].eachParallel {Number number -&gt; result.add(number * 10)}*     assertEquals(new HashSet([10, 20, 30, 40, 50]), result)
      *}* </pre>
      * @param numberOfThreads Number of threads in the newly created thread pool
      * @param cl The block of code to invoke with the DSL enabled
@@ -127,9 +128,9 @@ public class GParsPool {
      * operation on each image in the <i>images</i> collection in parallel.
      * Be sure to synchronize all modifiable state shared by the asynchronously running closures.
      * <pre>
-     * GParsPool.withPool(5, handler) {GParsPool pool ->
+     * GParsPool.withPool(5, handler) {GParsPool pool -&gt;
      *     def result = Collections.synchronizedSet(new HashSet())
-     *     [1, 2, 3, 4, 5].eachParallel {Number number -> result.add(number * 10)}*     assertEquals(new HashSet([10, 20, 30, 40, 50]), result)
+     *     [1, 2, 3, 4, 5].eachParallel {Number number -&gt; result.add(number * 10)}*     assertEquals(new HashSet([10, 20, 30, 40, 50]), result)
      *}* </pre>
      * @param numberOfThreads Number of threads in the newly created thread pool
      * @param handler Handler for uncaught exceptions raised in code performed by the pooled threads
@@ -155,9 +156,9 @@ public class GParsPool {
      * operation on each image in the <i>images</i> collection in parallel.
      * Be sure to synchronize all modifiable state shared by the asynchronously running closures.
      * <pre>
-     * GParsPool.withExistingPool(anotherPool) {GParsPool pool ->
+     * GParsPool.withExistingPool(anotherPool) {GParsPool pool -&gt;
      *     def result = Collections.synchronizedSet(new HashSet())
-     *     [1, 2, 3, 4, 5].eachParallel {Number number -> result.add(number * 10)}*     assertEquals(new HashSet([10, 20, 30, 40, 50]), result)
+     *     [1, 2, 3, 4, 5].eachParallel {Number number -&gt; result.add(number * 10)}*     assertEquals(new HashSet([10, 20, 30, 40, 50]), result)
      *}*  </pre>
      * @param pool The thread pool to use, the pool will not be shutdown after this method returns
      */
@@ -222,17 +223,17 @@ public class GParsPool {
     public static List<Future<Object>> executeAsync(Closure... closures) {
         jsr166y.ForkJoinPool pool = retrieveCurrentPool()
         if (pool == null) throw new IllegalStateException("No active Fork/Join thread pool available to execute closures asynchronously. Consider wrapping the function call with GParsPool.withPool().")
-        List<Future<Object>> result = closures.collect {cl ->
+        List<Future<Object>> result = closures.collect { cl ->
             pool.submit(new MyCancellableRecursiveTask(cl))
         }
         result
     }
 
     final static class MyCancellableRecursiveTask extends RecursiveTask {
-        private final def code
+        private final Closure code
         private volatile Thread myThread
 
-        MyCancellableRecursiveTask(final code) {
+        MyCancellableRecursiveTask(final Closure code) {
             this.code = code
         }
 
@@ -288,19 +289,19 @@ public class GParsPool {
         final AtomicInteger failureCounter = new AtomicInteger(0)
         futures << GParsPool.executeAsync(alternatives.collect {
             original ->
-            {->
-                //noinspection GroovyEmptyCatchBlock
-                try {
-                    def localResult = original()
-                    futures.val*.cancel(true)
-                    result << localResult
-                } catch (Exception e) {
-                    int counter = failureCounter.incrementAndGet()
-                    if (counter == alternatives.size()) {
-                        result << new IllegalStateException('All speculations failed', e)
+                {->
+                    //noinspection GroovyEmptyCatchBlock
+                    try {
+                        def localResult = original()
+                        futures.val*.cancel(true)
+                        result << localResult
+                    } catch (Exception e) {
+                        int counter = failureCounter.incrementAndGet()
+                        if (counter == alternatives.size()) {
+                            result << new IllegalStateException('All speculations failed', e)
+                        }
                     }
                 }
-            }
         })
         def r = result.val
         if (r instanceof Exception) throw r
@@ -308,7 +309,7 @@ public class GParsPool {
     }
 
     private static UncaughtExceptionHandler createDefaultUncaughtExceptionHandler() {
-        return {Thread failedThread, Throwable throwable ->
+        return { Thread failedThread, Throwable throwable ->
             System.err.println "Error processing background thread ${failedThread.name}: ${throwable.message}"
             throwable.printStackTrace(System.err)
         } as UncaughtExceptionHandler

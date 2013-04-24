@@ -1,6 +1,6 @@
 // GPars - Groovy Parallel Systems
 //
-// Copyright © 2008-11  The original author or authors
+// Copyright © 2008-2012  The original author or authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@ package groovyx.gpars.dataflow.operator;
 import groovy.lang.Closure;
 import groovyx.gpars.actor.StaticDispatchActor;
 import groovyx.gpars.actor.impl.MessageStream;
+import groovyx.gpars.dataflow.DataflowChannelListener;
+import groovyx.gpars.dataflow.DataflowReadChannel;
 import groovyx.gpars.group.PGroup;
 
 import java.util.List;
@@ -49,6 +51,28 @@ abstract class DataflowProcessorActor extends StaticDispatchActor<Object> {
         this.code = code;
     }
 
+    void afterStart() {
+        owningProcessor.fireAfterStart();
+    }
+
+    void afterStop() {
+        owningProcessor.fireAfterStop();
+    }
+
+    /**
+     * Registers the provided handler to all input channels
+     * @param handler The closure to invoke whenever a value gets bound to any of the input channels
+     */
+    final void registerChannelListenersToAllInputs(final DataflowChannelListener<Object> handler) {
+        for (final Object input : inputs) {
+            ((DataflowReadChannel<Object>) input).getEventManager().addDataflowChannelListener(handler);
+        }
+    }
+    final void onException(final Throwable e) {
+        reportException(e);
+        terminate();
+    }
+
     /**
      * Sends the message, ignoring exceptions caused by the actor not being active anymore
      *
@@ -75,6 +99,10 @@ abstract class DataflowProcessorActor extends StaticDispatchActor<Object> {
         throw new IllegalStateException("The dataflow actor doesn't recognize the message $message");
     }
 
+    static boolean isControlMessage(final Object message) {
+        return message instanceof ControlMessage;
+    }
+
     /**
      * Handles the poisson message.
      * After receiving the poisson a dataflow operator will send the poisson to all its output channels and terminate.
@@ -82,17 +110,27 @@ abstract class DataflowProcessorActor extends StaticDispatchActor<Object> {
      * @param data The poisson to re-send
      * @return True, if poisson has been received
      */
-    boolean checkPoison(final Object data) {
+    final void checkPoison(final Object data) {
         if (data instanceof PoisonPill) {
-            owningProcessor.bindAllOutputsAtomically(data);
+            forwardPoisonPill(data);
             owningProcessor.terminate();
             ((PoisonPill) data).countDown();
-            return true;
         }
-        return false;
+    }
+
+    protected void forwardPoisonPill(final Object data) {
+        owningProcessor.bindAllOutputsAtomically(data);
     }
 
     final void reportException(final Throwable e) {
         owningProcessor.reportError(e);
+    }
+
+    protected Object fireMessageArrived(final Object result, final int index, final boolean controlMessage) {
+        if (controlMessage) {
+            return owningProcessor.fireControlMessageArrived((DataflowReadChannel) inputs.get(index), index, result);
+        } else {
+            return owningProcessor.fireMessageArrived((DataflowReadChannel) inputs.get(index), index, result);
+        }
     }
 }

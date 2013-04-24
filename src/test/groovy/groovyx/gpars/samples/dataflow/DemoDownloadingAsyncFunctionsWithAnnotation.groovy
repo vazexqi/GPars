@@ -16,8 +16,9 @@
 
 package groovyx.gpars.samples.dataflow
 
-import static groovyx.gpars.GParsPool.withPool
 import groovyx.gpars.AsyncFun
+
+import static groovyx.gpars.GParsPool.withPool
 
 /**
  * Demonstrates the way to use @AsyncFun to build composable asynchronous functions.
@@ -49,4 +50,10 @@ class DownloadingSearch {
 
 withPool {
     new DownloadingSearch().scan()
+}
+
+//This time we create a pool for the scan() method call only
+final search = new DownloadingSearch()
+withPool {
+    search.scan()
 }

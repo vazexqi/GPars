@@ -1,6 +1,6 @@
 // GPars - Groovy Parallel Systems
 //
-// Copyright © 2008-11  The original author or authors
+// Copyright © 2008-2012  The original author or authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package org.codehaus.gpars.javademo;
 
 import groovyx.gpars.MessagingRunnable;
 import groovyx.gpars.dataflow.DataflowVariable;
+import groovyx.gpars.dataflow.Promise;
 import groovyx.gpars.group.DefaultPGroup;
 import org.junit.Test;
 
@@ -32,7 +33,7 @@ import static org.junit.Assert.assertEquals;
 public class DataflowTaskTest {
 
     @Test
-    public void testDataflowVariable() throws InterruptedException {
+    public void testDataflowVariable() throws Throwable {
         final List<String> logMessages = new ArrayList<String>();
 
         final DefaultPGroup group = new DefaultPGroup(10);
@@ -50,7 +51,7 @@ public class DataflowTaskTest {
         });
 
         // group.task will use thread from pool and uses it to execute call method
-        final DataflowVariable<?> result = group.task(new Callable() {
+        final Promise<?> result = group.task(new Callable() {
             public Object call() throws Exception {
                 // getVal will wait for the value to be assigned
                 final int result = a.getVal() + 10;
@@ -70,7 +71,7 @@ public class DataflowTaskTest {
         });
 
 
-        System.out.println("result = " + result.getVal());
+        System.out.println("result = " + result.get());
     }
 }
 

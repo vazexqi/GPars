@@ -20,7 +20,7 @@ import groovyx.gpars.dataflow.DataflowChannel
 import groovyx.gpars.dataflow.DataflowQueue
 import groovyx.gpars.group.DefaultPGroup
 
-group = new DefaultPGroup()
+group = new DefaultPGroup(6)
 
 def fib(DataflowChannel out) {
     group.task {
@@ -28,12 +28,12 @@ def fib(DataflowChannel out) {
         def b = new DataflowQueue()
         def c = new DataflowQueue()
         def d = new DataflowQueue()
-        [new Prefix(d, a, 0), new Prefix(c, d, 1), new Copy(a, b, out), new StatePairs(b, c)].each { group.task it}
+        [new Prefix(d, a, 0L), new Prefix(c, d, 1L), new Copy(a, b, out), new StatePairs(b, c)].each { group.task it}
     }
 }
 
 final DataflowQueue ch = new DataflowQueue()
-group.task new Print('Fibonnaci numbers', ch)
+group.task new Print('Fibonacci numbers', ch)
 fib(ch)
 
 sleep 10000

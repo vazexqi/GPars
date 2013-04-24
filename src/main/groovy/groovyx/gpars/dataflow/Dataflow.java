@@ -1,6 +1,6 @@
 // GPars - Groovy Parallel Systems
 //
-// Copyright © 2008-11  The original author or authors
+// Copyright © 2008-2012  The original author or authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,8 @@ import groovyx.gpars.group.PGroup;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+
+import static java.util.Arrays.asList;
 
 /**
  * Contains factory methods to create dataflow actors and starting them.
@@ -59,6 +61,24 @@ public abstract class Dataflow {
     }
 
     /**
+     * Sets the supplied PGroup as the default for the given block of code. All dataflow functions, such as task or operator
+     * and callback handlers, will use the PGroup and its thread pool for their scheduling.
+     *
+     * @param group The group to make the default inside the block
+     * @param code  The code to run with overriden default
+     * @return The value returned from the supplied code block
+     */
+    public static Object usingGroup(final PGroup group, final Closure code) {
+        final PGroup original = activeParallelGroup.get();
+        try {
+            activeParallelGroup.set(group);
+            return code.call();
+        } finally {
+            activeParallelGroup.set(original);
+        }
+    }
+
+    /**
      * Creates a new task assigned to a thread from the default dataflow parallel group.
      * Tasks are a lightweight version of dataflow operators, which do not define their communication channels explicitly,
      * but can only exchange data using explicit DataflowVariables and Streams.
@@ -66,8 +86,8 @@ public abstract class Dataflow {
      * @param code The task body to run
      * @return A DataflowVariable, which gets assigned the value returned from the supplied code
      */
-    public static DataflowVariable task(final Closure code) {
-        return Dataflow.DATA_FLOW_GROUP.task(code);
+    public static <T> Promise<T> task(final Closure<T> code) {
+        return retrieveCurrentDFPGroup().task(code);
     }
 
     /**
@@ -79,8 +99,8 @@ public abstract class Dataflow {
      * @param callable The task body to run
      * @return A DataflowVariable, which gets assigned the value returned from the supplied code
      */
-    public static DataflowVariable task(final Callable callable) {
-        return Dataflow.DATA_FLOW_GROUP.task(callable);
+    public static <T> Promise<T> task(final Callable<T> callable) {
+        return retrieveCurrentDFPGroup().task(callable);
     }
 
     /**
@@ -92,8 +112,8 @@ public abstract class Dataflow {
      * @param runnable The task body to run
      * @return A DataflowVariable, which gets bound to null once the supplied code finishes
      */
-    public static DataflowVariable task(final Runnable runnable) {
-        return Dataflow.DATA_FLOW_GROUP.task(runnable);
+    public static Promise<Object> task(final Runnable runnable) {
+        return retrieveCurrentDFPGroup().task(runnable);
     }
 
     /**
@@ -104,7 +124,7 @@ public abstract class Dataflow {
      * @return A new active operator instance
      */
     public static DataflowProcessor operator(final Map channels, final Closure code) {
-        return Dataflow.DATA_FLOW_GROUP.operator(channels, code);
+        return retrieveCurrentDFPGroup().operator(channels, code);
     }
 
     /**
@@ -116,7 +136,7 @@ public abstract class Dataflow {
      * @return A new active operator instance
      */
     public static DataflowProcessor operator(final List inputChannels, final List outputChannels, final Closure code) {
-        return Dataflow.DATA_FLOW_GROUP.operator(inputChannels, outputChannels, code);
+        return retrieveCurrentDFPGroup().operator(inputChannels, outputChannels, code);
     }
 
     /**
@@ -129,7 +149,7 @@ public abstract class Dataflow {
      * @return A new active operator instance
      */
     public static DataflowProcessor operator(final List inputChannels, final List outputChannels, final int maxForks, final Closure code) {
-        return Dataflow.DATA_FLOW_GROUP.operator(inputChannels, outputChannels, maxForks, code);
+        return retrieveCurrentDFPGroup().operator(inputChannels, outputChannels, maxForks, code);
     }
 
     /**
@@ -141,7 +161,7 @@ public abstract class Dataflow {
      * @return A new active operator instance
      */
     public static DataflowProcessor operator(final DataflowReadChannel input, final DataflowWriteChannel output, final Closure code) {
-        return Dataflow.DATA_FLOW_GROUP.operator(input, output, code);
+        return retrieveCurrentDFPGroup().operator(input, output, code);
     }
 
     /**
@@ -154,7 +174,7 @@ public abstract class Dataflow {
      * @return A new active operator instance
      */
     public static DataflowProcessor operator(final DataflowReadChannel input, final DataflowWriteChannel output, final int maxForks, final Closure code) {
-        return Dataflow.DATA_FLOW_GROUP.operator(input, output, maxForks, code);
+        return retrieveCurrentDFPGroup().operator(input, output, maxForks, code);
     }
 
     /**
@@ -165,7 +185,7 @@ public abstract class Dataflow {
      * @return A new active selector instance
      */
     public static DataflowProcessor selector(final Map channels, final Closure code) {
-        return Dataflow.DATA_FLOW_GROUP.selector(channels, code);
+        return retrieveCurrentDFPGroup().selector(channels, code);
     }
 
     /**
@@ -177,7 +197,7 @@ public abstract class Dataflow {
      * @return A new active selector instance
      */
     public static DataflowProcessor selector(final List inputChannels, final List outputChannels, final Closure code) {
-        return Dataflow.DATA_FLOW_GROUP.selector(inputChannels, outputChannels, code);
+        return retrieveCurrentDFPGroup().selector(inputChannels, outputChannels, code);
     }
 
     /**
@@ -187,7 +207,7 @@ public abstract class Dataflow {
      * @return A new active selector instance
      */
     public static DataflowProcessor selector(final Map channels) {
-        return Dataflow.DATA_FLOW_GROUP.selector(channels);
+        return retrieveCurrentDFPGroup().selector(channels);
     }
 
     /**
@@ -198,7 +218,7 @@ public abstract class Dataflow {
      * @return A new active selector instance
      */
     public static DataflowProcessor selector(final List inputChannels, final List outputChannels) {
-        return Dataflow.DATA_FLOW_GROUP.selector(inputChannels, outputChannels);
+        return retrieveCurrentDFPGroup().selector(inputChannels, outputChannels);
     }
 
     /**
@@ -210,7 +230,7 @@ public abstract class Dataflow {
      * @return A new active selector instance
      */
     public static DataflowProcessor prioritySelector(final Map channels, final Closure code) {
-        return Dataflow.DATA_FLOW_GROUP.prioritySelector(channels, code);
+        return retrieveCurrentDFPGroup().prioritySelector(channels, code);
     }
 
     /**
@@ -223,7 +243,7 @@ public abstract class Dataflow {
      * @return A new active selector instance
      */
     public static DataflowProcessor prioritySelector(final List inputChannels, final List outputChannels, final Closure code) {
-        return Dataflow.DATA_FLOW_GROUP.prioritySelector(inputChannels, outputChannels, code);
+        return retrieveCurrentDFPGroup().prioritySelector(inputChannels, outputChannels, code);
     }
 
     /**
@@ -234,7 +254,7 @@ public abstract class Dataflow {
      * @return A new active selector instance
      */
     public static DataflowProcessor prioritySelector(final Map channels) {
-        return Dataflow.DATA_FLOW_GROUP.prioritySelector(channels);
+        return retrieveCurrentDFPGroup().prioritySelector(channels);
     }
 
     /**
@@ -246,7 +266,7 @@ public abstract class Dataflow {
      * @return A new active selector instance
      */
     public static DataflowProcessor prioritySelector(final List inputChannels, final List outputChannels) {
-        return Dataflow.DATA_FLOW_GROUP.prioritySelector(inputChannels, outputChannels);
+        return retrieveCurrentDFPGroup().prioritySelector(inputChannels, outputChannels);
     }
 
     /**
@@ -258,7 +278,7 @@ public abstract class Dataflow {
      * @return A new active splitter instance
      */
     public static DataflowProcessor splitter(final DataflowReadChannel inputChannel, final List<DataflowWriteChannel> outputChannels) {
-        return Dataflow.DATA_FLOW_GROUP.splitter(inputChannel, outputChannels);
+        return retrieveCurrentDFPGroup().splitter(inputChannel, outputChannels);
     }
 
     /**
@@ -271,7 +291,7 @@ public abstract class Dataflow {
      * @return A new active splitter instance
      */
     public static DataflowProcessor splitter(final DataflowReadChannel inputChannel, final List<DataflowWriteChannel> outputChannels, final int maxForks) {
-        return Dataflow.DATA_FLOW_GROUP.splitter(inputChannel, outputChannels, maxForks);
+        return retrieveCurrentDFPGroup().splitter(inputChannel, outputChannels, maxForks);
     }
 
     /**
@@ -282,7 +302,7 @@ public abstract class Dataflow {
      * @return A new select instance
      */
     public static Select<?> select(final DataflowReadChannel<?>... channels) {
-        return Dataflow.DATA_FLOW_GROUP.select(channels);
+        return retrieveCurrentDFPGroup().select(channels);
     }
 
     /**
@@ -293,7 +313,7 @@ public abstract class Dataflow {
      * @return A new select instance
      */
     public static Select<?> select(final List<DataflowReadChannel> channels) {
-        return Dataflow.DATA_FLOW_GROUP.select(channels);
+        return retrieveCurrentDFPGroup().select(channels);
     }
 
     /**
@@ -304,7 +324,132 @@ public abstract class Dataflow {
      * @param <T>      The type of the final result
      * @return A promise for the final result
      */
-    public static <T> Promise<T> whenAllBound(final List<Promise<?>> promises, final Closure<T> code) {
+    public static <T> Promise<T> whenAllBound(final List<Promise> promises, final Closure<T> code) {
         return retrieveCurrentDFPGroup().whenAllBound(promises, code);
+    }
+
+    /**
+     * Without blocking the thread waits for all the promises to get bound and then passes them to the supplied closure.
+     *
+     * @param promise1 The promises to wait for
+     * @param code     A closure to execute with concrete values for each of the supplied promises
+     * @param <T>      The type of the final result
+     * @return A promise for the final result
+     */
+    public static <T> Promise<T> whenAllBound(final Promise promise1, final Closure<T> code) {
+        return retrieveCurrentDFPGroup().whenAllBound(asList(promise1), code);
+    }
+
+    /**
+     * Without blocking the thread waits for all the promises to get bound and then passes them to the supplied closure.
+     *
+     * @param promise1 The promises to wait for
+     * @param promise2 The promises to wait for
+     * @param code     A closure to execute with concrete values for each of the supplied promises
+     * @param <T>      The type of the final result
+     * @return A promise for the final result
+     */
+    public static <T> Promise<T> whenAllBound(final Promise promise1, final Promise promise2, final Closure<T> code) {
+        return retrieveCurrentDFPGroup().whenAllBound(asList(promise1, promise2), code);
+    }
+
+    /**
+     * Without blocking the thread waits for all the promises to get bound and then passes them to the supplied closure.
+     *
+     * @param promise1 The promises to wait for
+     * @param promise2 The promises to wait for
+     * @param promise3 The promises to wait for
+     * @param code     A closure to execute with concrete values for each of the supplied promises
+     * @param <T>      The type of the final result
+     * @return A promise for the final result
+     */
+    public static <T> Promise<T> whenAllBound(final Promise promise1, final Promise promise2, final Promise promise3, final Closure<T> code) {
+        return retrieveCurrentDFPGroup().whenAllBound(asList(promise1, promise2, promise3), code);
+    }
+
+    /**
+     * Without blocking the thread waits for all the promises to get bound and then passes them to the supplied closure.
+     *
+     * @param promise1 The promises to wait for
+     * @param promise2 The promises to wait for
+     * @param promise3 The promises to wait for
+     * @param promise4 The promises to wait for
+     * @param code     A closure to execute with concrete values for each of the supplied promises
+     * @param <T>      The type of the final result
+     * @return A promise for the final result
+     */
+    public static <T> Promise<T> whenAllBound(final Promise promise1, final Promise promise2, final Promise promise3, final Promise promise4, final Closure<T> code) {
+        return retrieveCurrentDFPGroup().whenAllBound(asList(promise1, promise2, promise3, promise4), code);
+    }
+
+    /**
+     * Without blocking the thread waits for all the promises to get bound and then passes them to the supplied closure.
+     *
+     * @param promises     The promises to wait for
+     * @param code         A closure to execute with concrete values for each of the supplied promises
+     * @param errorHandler A closure handling an exception (an instance of Throwable), if if it gets bound
+     * @param <T>          The type of the final result
+     * @return A promise for the final result
+     */
+    public static <T> Promise<T> whenAllBound(final List<Promise> promises, final Closure<T> code, final Closure<T> errorHandler) {
+        return retrieveCurrentDFPGroup().whenAllBound(promises, code, errorHandler);
+    }
+
+    /**
+     * Without blocking the thread waits for all the promises to get bound and then passes them to the supplied closure.
+     *
+     * @param promise1     The promises to wait for
+     * @param code         A closure to execute with concrete values for each of the supplied promises
+     * @param errorHandler A closure handling an exception (an instance of Throwable), if if it gets bound
+     * @param <T>          The type of the final result
+     * @return A promise for the final result
+     */
+    public static <T> Promise<T> whenAllBound(final Promise promise1, final Closure<T> code, final Closure<T> errorHandler) {
+        return retrieveCurrentDFPGroup().whenAllBound(asList(promise1), code, errorHandler);
+    }
+
+    /**
+     * Without blocking the thread waits for all the promises to get bound and then passes them to the supplied closure.
+     *
+     * @param promise1     The promises to wait for
+     * @param promise2     The promises to wait for
+     * @param code         A closure to execute with concrete values for each of the supplied promises
+     * @param errorHandler A closure handling an exception (an instance of Throwable), if if it gets bound
+     * @param <T>          The type of the final result
+     * @return A promise for the final result
+     */
+    public static <T> Promise<T> whenAllBound(final Promise promise1, final Promise promise2, final Closure<T> code, final Closure<T> errorHandler) {
+        return retrieveCurrentDFPGroup().whenAllBound(asList(promise1, promise2), code, errorHandler);
+    }
+
+    /**
+     * Without blocking the thread waits for all the promises to get bound and then passes them to the supplied closure.
+     *
+     * @param promise1     The promises to wait for
+     * @param promise2     The promises to wait for
+     * @param promise3     The promises to wait for
+     * @param code         A closure to execute with concrete values for each of the supplied promises
+     * @param errorHandler A closure handling an exception (an instance of Throwable), if if it gets bound
+     * @param <T>          The type of the final result
+     * @return A promise for the final result
+     */
+    public static <T> Promise<T> whenAllBound(final Promise promise1, final Promise promise2, final Promise promise3, final Closure<T> code, final Closure<T> errorHandler) {
+        return retrieveCurrentDFPGroup().whenAllBound(asList(promise1, promise2, promise3), code, errorHandler);
+    }
+
+    /**
+     * Without blocking the thread waits for all the promises to get bound and then passes them to the supplied closure.
+     *
+     * @param promise1     The promises to wait for
+     * @param promise2     The promises to wait for
+     * @param promise3     The promises to wait for
+     * @param promise4     The promises to wait for
+     * @param code         A closure to execute with concrete values for each of the supplied promises
+     * @param errorHandler A closure handling an exception (an instance of Throwable), if if it gets bound
+     * @param <T>          The type of the final result
+     * @return A promise for the final result
+     */
+    public static <T> Promise<T> whenAllBound(final Promise promise1, final Promise promise2, final Promise promise3, final Promise promise4, final Closure<T> code, final Closure<T> errorHandler) {
+        return retrieveCurrentDFPGroup().whenAllBound(asList(promise1, promise2, promise3, promise4), code, errorHandler);
     }
 }
