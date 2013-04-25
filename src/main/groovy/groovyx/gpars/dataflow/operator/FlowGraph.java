@@ -34,6 +34,11 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import groovyx.gpars.dataflow.DataflowWriteChannel;
+import groovyx.gpars.dataflow.DataflowReadChannel;
+
+import static java.util.Arrays.asList;
+
 public class FlowGraph {
     private final List<DataflowProcessor> processors;
     private final PGroup pGroup;
@@ -133,10 +138,39 @@ public class FlowGraph {
         return operator.start();
     }
 
+    public DataflowProcessor operator(final DataflowReadChannel input, final DataflowWriteChannel output, final Closure code) {
+        final HashMap<String, List> params = new HashMap<String, List>(5);
+        params.put(DataflowProcessor.INPUTS, asList(input));
+        params.put(DataflowProcessor.OUTPUTS, asList(output));
+
+        final DataflowOperator operator = new FlowGraphDataflowOperator(pGroup, params, code);
+        substituteOperatorCore(operator);
+
+        if (isFair) operator.actor.makeFair();
+
+        processors.add(operator);
+        return operator.start();
+    }
+
     public DataflowProcessor operator(final List inputChannels, final List outputChannels, final int maxForks, final Closure code) {
         final HashMap<String, Object> params = new HashMap<String, Object>(5);
         params.put(DataflowProcessor.INPUTS, inputChannels);
         params.put(DataflowProcessor.OUTPUTS, outputChannels);
+        params.put(DataflowProcessor.MAX_FORKS, maxForks);
+
+        final DataflowOperator operator = new FlowGraphDataflowOperator(pGroup, params, code);
+        substituteOperatorCore(operator);
+
+        if (isFair) operator.actor.makeFair();
+
+        processors.add(operator);
+        return operator.start();
+    }
+
+    public DataflowProcessor operator(final DataflowReadChannel input, final DataflowWriteChannel output, final int maxForks, final Closure code) {
+        final HashMap<String, Object> params = new HashMap<String, Object>(5);
+        params.put(DataflowProcessor.INPUTS, asList(input));
+        params.put(DataflowProcessor.OUTPUTS, asList(output));
         params.put(DataflowProcessor.MAX_FORKS, maxForks);
 
         final DataflowOperator operator = new FlowGraphDataflowOperator(pGroup, params, code);
